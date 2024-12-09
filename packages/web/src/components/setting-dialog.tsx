@@ -5,11 +5,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@web-archive/shared/components/switch'
 import { useTheme } from '@web-archive/shared/components/theme-provider'
 import { Settings } from 'lucide-react'
+import AITagSettingCollapsible from './ai-tag-setting-collapsible'
 import { useShouldShowRecent } from '~/hooks/useShouldShowRecent'
 
 function SettingDialog({ open, setOpen }: { open: boolean, setOpen: (open: boolean) => void }) {
   const { theme, setTheme } = useTheme()
-  const { shouldShowRencent, updateShouldShowRecent } = useShouldShowRecent()
+  const { shouldShowRecent, updateShouldShowRecent } = useShouldShowRecent()
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -39,10 +40,13 @@ function SettingDialog({ open, setOpen }: { open: boolean, setOpen: (open: boole
           <div className="flex items-center space-x-6">
             <Label className="font-bold">Show Recent Save Page: </Label>
             <Switch
-              checked={shouldShowRencent}
+              checked={shouldShowRecent}
               onCheckedChange={updateShouldShowRecent}
             >
             </Switch>
+          </div>
+          <div>
+            <AITagSettingCollapsible></AITagSettingCollapsible>
           </div>
         </div>
       </DialogContent>
