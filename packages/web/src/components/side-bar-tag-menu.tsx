@@ -6,13 +6,16 @@ import type { Tag } from '@web-archive/shared/types'
 import { cn } from '@web-archive/shared/utils'
 import { useRequest } from 'ahooks'
 import { ChevronDown, Pencil, TagIcon, Trash } from 'lucide-react'
-import { useContext, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
+import { useTranslation } from 'react-i18next'
 import EditTagDialog from './edit-tag-dialog'
 import { deleteTag } from '~/data/tag'
 import TagContext from '~/store/tag'
+import { queryAllPageIds } from '~/data/page'
 
 interface SidebarTagMenuProps {
+  selectedFolder: number | null
   selectedTag: number | null
   setSelectedTag: (tag: number | null) => void
 }
@@ -26,6 +29,7 @@ interface TagBadgeProps {
 }
 
 function TagBadge({ tag, isSelected, onClick, onDelete, onEdit }: TagBadgeProps) {
+  const { t } = useTranslation()
   const labelText = `${tag.name} (${tag.pageIds.length})`
   return (
     <ContextMenu>
@@ -45,21 +49,22 @@ function TagBadge({ tag, isSelected, onClick, onDelete, onEdit }: TagBadgeProps)
           onClick={onEdit}
         >
           <Pencil size={12} />
-          <div>Edit</div>
+          <div>{t('edit')}</div>
         </ContextMenuItem>
         <ContextMenuItem
           className="flex items-center space-x-2 cursor-pointer"
           onClick={onDelete}
         >
           <Trash size={12} />
-          <div>Delete</div>
+          <div>{t('delete')}</div>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   )
 }
 
-function SidebarTagMenu({ selectedTag, setSelectedTag }: SidebarTagMenuProps) {
+function SidebarTagMenu({ selectedTag, setSelectedTag, selectedFolder }: SidebarTagMenuProps) {
+  const { t } = useTranslation()
   const { tagCache: tags, refreshTagCache } = useContext(TagContext)
   const [isTagsCollapseOpen, setIsTagsCollapseOpen] = useState(false)
 
@@ -89,6 +94,19 @@ function SidebarTagMenu({ selectedTag, setSelectedTag }: SidebarTagMenuProps) {
     setEditTag(tag)
   }
 
+  const [showTagList, setShowTagList] = useState(tags)
+  useEffect(() => {
+    if (!selectedFolder) {
+      setShowTagList(tags)
+      return
+    }
+    queryAllPageIds(selectedFolder).then((data) => {
+      const newTags = tags.filter((tag) => {
+        return tag.pageIds.some(pageId => data.includes(pageId))
+      })
+      setShowTagList(newTags)
+    })
+  }, [selectedFolder, tags])
   return (
     <SidebarMenu>
       <EditTagDialog editTag={editTag} afterSubmit={refreshTagCache} open={editTagDialogOpen} setOpen={setEditTagDialogOpen}></EditTagDialog>
@@ -100,7 +118,7 @@ function SidebarTagMenu({ selectedTag, setSelectedTag }: SidebarTagMenuProps) {
           <SidebarMenuButton className="w-full justify-between">
             <div className="flex items-center">
               <TagIcon className="mr-2 h-4 w-4"></TagIcon>
-              Tags
+              {t('tags')}
             </div>
             <ChevronDown className={cn('h-4 w-4 transition-transform', isTagsCollapseOpen && 'rotate-180')} />
           </SidebarMenuButton>
@@ -110,7 +128,7 @@ function SidebarTagMenu({ selectedTag, setSelectedTag }: SidebarTagMenuProps) {
             onContextMenu={e => e.preventDefault()}
           >
             <div className="space-y-2">
-              {tags?.map(tag => (
+              {showTagList?.map(tag => (
                 <TagBadge
                   key={tag.id}
                   tag={tag}
