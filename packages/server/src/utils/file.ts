@@ -1,5 +1,8 @@
 import { Buffer } from 'node:buffer'
 import { isNil } from '@web-archive/shared/utils'
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
+import type { S3Client } from '@aws-sdk/client-s3'
+import { S3_BUCKET_NAME } from '~/constants/config'
 
 export async function formFileToArrayBuffer(file: File | string) {
   if (typeof file === 'string') {
@@ -11,32 +14,52 @@ export async function formFileToArrayBuffer(file: File | string) {
   }
 }
 
-export async function removeBucketFile(BUCKET: R2Bucket, ids: string | string[]) {
+export async function removeBucketFile(BUCKET: S3Client, ids: string | string[]) {
   if (isNil(ids)) {
     return
   }
 
-  await BUCKET.delete(ids)
+  const keys = Array.isArray(ids) ? ids : [ids]
+  await Promise.all(keys.map(key =>
+    BUCKET.send(new DeleteObjectCommand({
+      Bucket: S3_BUCKET_NAME,
+      Key: key,
+    })),
+  ))
 }
 
-export async function saveFileToBucket(BUCKET: R2Bucket, file: File | string) {
+export async function saveFileToBucket(BUCKET: S3Client, file: File | string) {
   if (isNil(file)) {
     return
   }
   const id = crypto.randomUUID()
   const fileArraybuffer = await formFileToArrayBuffer(file)
-  const uploadFileResult = await BUCKET.put(id, fileArraybuffer)
-  if (uploadFileResult === null) {
-    return
-  }
+  await BUCKET.send(new PutObjectCommand({
+    Bucket: S3_BUCKET_NAME,
+    Key: id,
+    Body: Buffer.from(fileArraybuffer),
+  }))
   return id
 }
 
-export async function getFileFromBucket(BUCKET: R2Bucket, id: string) {
-  return await BUCKET.get(id)
+export async function getFileFromBucket(BUCKET: S3Client, id: string) {
+  try {
+    const response = await BUCKET.send(new GetObjectCommand({
+      Bucket: S3_BUCKET_NAME,
+      Key: id,
+    }))
+    if (!response.Body) {
+      return null
+    }
+    const arrayBuffer = await response.Body.transformToByteArray()
+    return new Response(arrayBuffer)
+  }
+  catch (error) {
+    return null
+  }
 }
 
-export async function getBase64FileFromBucket(BUCKET: R2Bucket, id: string, type?: string) {
+export async function getBase64FileFromBucket(BUCKET: S3Client, id: string, type?: string) {
   const file = await getFileFromBucket(BUCKET, id)
   if (isNil(file)) {
     return

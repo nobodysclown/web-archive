@@ -60,15 +60,11 @@ app.delete(
 
     const { folderResult, pageResult } = await deleteFolderById(c.env.DB, id)
 
-    if (folderResult.error || pageResult.error) {
-      throw folderResult.error || pageResult.error
-    }
-
-    if (folderResult.meta.changes === 0 && pageResult.meta.changes === 0) {
+    if (folderResult.changes === 0 && pageResult.changes === 0) {
       return c.json(result.error(400, 'No changes made'))
     }
 
-    if (folderResult.meta.changes !== 1 || pageResult.meta.changes !== allPages.length) {
+    if (folderResult.changes !== 1 || pageResult.changes !== allPages.length) {
       return c.json(result.error(400, 'Some folders or pages are not deleted'))
     }
 
@@ -95,8 +91,8 @@ app.put(
   async (c) => {
     const { id, name } = c.req.valid('json')
 
-    const sqlResult = await updateFolder(c.env.DB, { id, name })
-    if (sqlResult.meta.changes === 0) {
+    const success = await updateFolder(c.env.DB, { id, name })
+    if (!success) {
       if (!(await checkFolderExists(c.env.DB, name))) {
         return c.json(result.error(400, 'Folder does not exists'))
       }

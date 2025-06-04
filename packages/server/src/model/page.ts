@@ -1,10 +1,12 @@
 import { isNotNil } from '@web-archive/shared/utils'
+import type { Database } from 'better-sqlite3'
+import type { S3Client } from '@aws-sdk/client-s3'
 import type { TagBindRecord } from './tag'
 import { generateUpdateTagSql } from './tag'
 import type { Page } from '~/sql/types'
 import { removeBucketFile } from '~/utils/file'
 
-async function selectPageTotalCount(DB: D1Database, options: { folderId?: number, keyword?: string, tagId?: number }) {
+async function selectPageTotalCount(DB: Database, options: { folderId?: number, keyword?: string, tagId?: number }) {
   const { folderId, keyword, tagId } = options
   let sql = `
     SELECT COUNT(*) as count FROM pages
@@ -27,20 +29,20 @@ async function selectPageTotalCount(DB: D1Database, options: { folderId?: number
     bindParams.push(tagId)
   }
 
-  const result = await DB.prepare(sql).bind(...bindParams).first()
-  return result.count
+  const result = DB.prepare<unknown[], { count: number }>(sql).get(...bindParams)
+  return result?.count ?? 0
 }
 
-async function selectAllPageCount(DB: D1Database) {
+async function selectAllPageCount(DB: Database) {
   const sql = `
     SELECT COUNT(*) as count FROM pages
     WHERE isDeleted = 0
   `
-  const result = await DB.prepare(sql).first()
-  return result.count
+  const result = DB.prepare<unknown[], { count: number }>(sql).get()
+  return result?.count ?? 0
 }
 
-async function queryPage(DB: D1Database, options: { folderId?: number, pageNumber?: number, pageSize?: number, keyword?: string, tagId?: number }) {
+async function queryPage(DB: Database, options: { folderId?: number, pageNumber?: number, pageSize?: number, keyword?: string, tagId?: number }) {
   const { folderId, pageNumber, pageSize, keyword, tagId } = options
   let sql = `
     SELECT
@@ -83,29 +85,26 @@ async function queryPage(DB: D1Database, options: { folderId?: number, pageNumbe
     bindParams.push((pageNumber - 1) * pageSize)
   }
 
-  const sqlResult = await DB.prepare(sql).bind(...bindParams).all<Page>()
-  if (sqlResult.error) {
-    throw sqlResult.error
-  }
-  return sqlResult.results
+  const results = DB.prepare<unknown[], Page>(sql).all(...bindParams)
+  return results
 }
 
-async function queryPageByUrl(DB: D1Database, pageUrl: string) {
+async function queryPageByUrl(DB: Database, pageUrl: string) {
   const sql = `SELECT * FROM pages WHERE pageUrl = ? AND isDeleted = 0`
-  const result = await DB.prepare(sql).bind(pageUrl).all<Page>()
-  return result.results
+  const results = DB.prepare<unknown[], Page>(sql).all(pageUrl)
+  return results
 }
 
-async function selectDeletedPageTotalCount(DB: D1Database) {
+async function selectDeletedPageTotalCount(DB: Database) {
   const sql = `
     SELECT COUNT(*) as count FROM pages
     WHERE isDeleted = 1
   `
-  const result = await DB.prepare(sql).first()
-  return result.count
+  const result = DB.prepare<unknown[], { count: number }>(sql).get()
+  return result?.count ?? 0
 }
 
-async function queryDeletedPage(DB: D1Database) {
+async function queryDeletedPage(DB: Database) {
   const sql = `
     SELECT
       id,
@@ -121,11 +120,11 @@ async function queryDeletedPage(DB: D1Database) {
     WHERE isDeleted = 1
     ORDER BY updatedAt DESC
   `
-  const result = await DB.prepare(sql).all<Page>()
-  return result.results
+  const results = DB.prepare<unknown[], Page>(sql).all()
+  return results
 }
 
-async function deletePageById(DB: D1Database, pageId: number) {
+async function deletePageById(DB: Database, pageId: number) {
   const sql = `
     UPDATE pages
     SET 
@@ -133,11 +132,11 @@ async function deletePageById(DB: D1Database, pageId: number) {
       deletedAt = CURRENT_TIMESTAMP
     WHERE id = ?
   `
-  const result = await DB.prepare(sql).bind(pageId).run()
-  return result.success
+  const result = DB.prepare(sql).run(pageId)
+  return result.changes > 0
 }
 
-async function restorePage(DB: D1Database, id: number) {
+async function restorePage(DB: Database, id: number) {
   const sql = `
     UPDATE pages
     SET 
@@ -145,11 +144,11 @@ async function restorePage(DB: D1Database, id: number) {
       deletedAt = NULL
     WHERE id = ?
   `
-  const result = await DB.prepare(sql).bind(id).run()
-  return result.success && result.meta.changes > 0
+  const result = DB.prepare(sql).run(id)
+  return result.changes > 0
 }
 
-async function getPageById(DB: D1Database, options: { id: number, isDeleted?: boolean }) {
+async function getPageById(DB: Database, options: { id: number, isDeleted?: boolean }) {
   const { id, isDeleted } = options
   const sql = `
     SELECT 
@@ -157,7 +156,7 @@ async function getPageById(DB: D1Database, options: { id: number, isDeleted?: bo
     FROM pages
     WHERE id = ?
   `
-  const page = await DB.prepare(sql).bind(id).first<Page>()
+  const page = DB.prepare(sql).get(id) as Page | undefined
   if (isNotNil(isDeleted) && page?.isDeleted !== Number(isDeleted)) {
     return null
   }
@@ -174,26 +173,23 @@ interface InsertPageOptions {
   isShowcased: boolean
 }
 
-async function insertPage(DB: D1Database, pageOptions: InsertPageOptions) {
+async function insertPage(DB: Database, pageOptions: InsertPageOptions) {
+  console.log('insertPage', pageOptions)
   const { title, pageDesc, pageUrl, contentUrl, folderId, screenshotId = null, isShowcased } = pageOptions
-  const insertResult = await DB
+  const result = DB
     .prepare(
       'INSERT INTO pages (title, pageDesc, pageUrl, contentUrl, folderId, screenshotId, isShowcased) VALUES (?, ?, ?, ?, ?, ?, ?)',
     )
-    .bind(title, pageDesc, pageUrl, contentUrl, folderId, screenshotId, isShowcased)
-    .run()
-  return insertResult.meta.last_row_id
+    .run(title, pageDesc, pageUrl, contentUrl, folderId, screenshotId, isShowcased ? 1 : 0)
+  return result.lastInsertRowid
 }
 
-async function clearDeletedPage(DB: D1Database, BUCKET: R2Bucket) {
+async function clearDeletedPage(DB: Database, BUCKET: S3Client) {
   const pageListSql = `
     SELECT * FROM pages WHERE isDeleted = 1
   `
-  const deletePageResult = await DB.prepare(pageListSql).all<Page>()
-  if (deletePageResult.error) {
-    return false
-  }
-  const deleteBucketKeys = deletePageResult.results
+  const pages = DB.prepare<unknown[], Page>(pageListSql).all()
+  const deleteBucketKeys = pages
     .map(page => [page.screenshotId, page.contentUrl])
     .flat()
     .filter(isNotNil)
@@ -202,16 +198,16 @@ async function clearDeletedPage(DB: D1Database, BUCKET: R2Bucket) {
   const sql = `
     DELETE FROM pages WHERE isDeleted = 1
   `
-  const result = await DB.prepare(sql).run()
-  return result.success
+  const result = DB.prepare(sql).run()
+  return result.changes > 0
 }
 
-async function queryRecentSavePage(DB: D1Database) {
+async function queryRecentSavePage(DB: Database) {
   const sql = `
     SELECT * FROM pages WHERE isDeleted = 0 ORDER BY createdAt DESC LIMIT 20
   `
-  const result = await DB.prepare(sql).all<Page>()
-  return result.results
+  const results = DB.prepare<unknown[], Page>(sql).all()
+  return results
 }
 
 interface UpdatePageOptions {
@@ -225,7 +221,7 @@ interface UpdatePageOptions {
   unbindTags?: Array<TagBindRecord>
 }
 
-async function updatePage(DB: D1Database, options: UpdatePageOptions) {
+async function updatePage(DB: Database, options: UpdatePageOptions) {
   const { id, folderId, title, isShowcased, pageDesc, pageUrl, bindTags = [], unbindTags = [] } = options
   const sql = `
     UPDATE pages
@@ -237,18 +233,18 @@ async function updatePage(DB: D1Database, options: UpdatePageOptions) {
       pageUrl = ?
     WHERE id = ?
   `
-  const updateSql = DB.prepare(sql).bind(folderId, title, isShowcased, pageDesc, pageUrl, id)
+  const updateSql = DB.prepare(sql).run(folderId, title, isShowcased, pageDesc, pageUrl, id)
   const updateSqlList = generateUpdateTagSql(DB, bindTags, unbindTags)
-  const result = await DB.batch([updateSql, ...updateSqlList])
-  return result.every(r => r.success)
+  const results = updateSqlList.map(stmt => stmt.run())
+  return updateSql.changes > 0 && results.every(r => r.changes > 0)
 }
 
-async function queryAllPageIds(DB: D1Database, folderId: number) {
+async function queryAllPageIds(DB: Database, folderId: number) {
   const sql = `
     SELECT id FROM pages WHERE folderId = ? AND isDeleted = 0
   `
-  const result = await DB.prepare(sql).bind(folderId).all()
-  return result.results.map(r => r.id)
+  const results = DB.prepare<unknown[], { id: number }>(sql).all(folderId)
+  return results.map(r => r.id)
 }
 
 export {

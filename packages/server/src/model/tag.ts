@@ -1,17 +1,15 @@
 import { isNil } from '@web-archive/shared/utils'
+import type { Database } from 'better-sqlite3'
 import type { Tag } from '~/sql/types'
 
-async function selectAllTags(DB: D1Database) {
+async function selectAllTags(DB: Database) {
   const sql = `
     SELECT 
       *
     FROM tags
   `
-  const sqlResult = await DB.prepare(sql).all<Tag>()
-  if (sqlResult.error) {
-    throw sqlResult.error
-  }
-  const tagList = sqlResult.results.map((tag) => {
+  const results = DB.prepare<unknown[], Tag>(sql).all()
+  const tagList = results.map((tag) => {
     const pageIdDict = JSON.parse(tag.pageIdDict) as Record<string, number>
     return {
       ...tag,
@@ -21,14 +19,17 @@ async function selectAllTags(DB: D1Database) {
   return tagList
 }
 
-async function getTagById(DB: D1Database, id: number) {
+async function getTagById(DB: Database, id: number) {
   const sql = `
     SELECT 
       *
     FROM tags
     WHERE id = ?
   `
-  const tag = await DB.prepare(sql).bind(id).first<Tag>()
+  const tag = DB.prepare<unknown[], Tag>(sql).get(id)
+  if (!tag) {
+    return null
+  }
   const pageIdDict = JSON.parse(tag.pageIdDict) as Record<string, number>
   return {
     ...tag,
@@ -36,17 +37,17 @@ async function getTagById(DB: D1Database, id: number) {
   }
 }
 
-async function insertTag(DB: D1Database, options: { name: string, color: string }) {
+async function insertTag(DB: Database, options: { name: string, color: string }) {
   const { name, color } = options
   const sql = `
     INSERT INTO tags (name, color) 
     VALUES (?, ?)
   `
-  const sqlResult = await DB.prepare(sql).bind(name, color).run()
-  return sqlResult.success
+  const result = DB.prepare(sql).run(name, color)
+  return result.changes > 0
 }
 
-async function updateTag(DB: D1Database, options: { id: number, name?: string, color?: string }) {
+async function updateTag(DB: Database, options: { id: number, name?: string, color?: string }) {
   const { id, name, color } = options
   if (isNil(id)) {
     throw new Error('Tag id is required')
@@ -69,17 +70,17 @@ async function updateTag(DB: D1Database, options: { id: number, name?: string, c
   }
   sql = `${sql.slice(0, -2)} WHERE id = ?`
   bindParams.push(id)
-  const sqlResult = await DB.prepare(sql).bind(...bindParams).run()
-  return sqlResult.success
+  const result = DB.prepare(sql).run(...bindParams)
+  return result.changes > 0
 }
 
-async function deleteTagById(DB: D1Database, id: number) {
+async function deleteTagById(DB: Database, id: number) {
   const sql = `
     DELETE FROM tags
     WHERE id = ?
   `
-  const sqlResult = await DB.prepare(sql).bind(id).run()
-  return sqlResult.success
+  const result = DB.prepare(sql).run(id)
+  return result.changes > 0
 }
 
 interface TagBindRecord {
@@ -88,20 +89,24 @@ interface TagBindRecord {
 }
 
 function generateUpdateTagSql(
-  DB: D1Database,
+  DB: Database,
   bindList: Array<TagBindRecord>,
   unbindList: Array<TagBindRecord>,
 ) {
-  const updateStmt = DB.prepare(`
-    INSERT INTO tags (name, pageIdDict) VALUES (?, ?)
-      ON CONFLICT(name) DO UPDATE SET pageIdDict = json_patch(pageIdDict, ?) WHERE name = ?
-    `)
   const bindCommands = bindList.map(({ tagName, pageIds }) => {
+    const updateStmt = DB.prepare(`
+      INSERT INTO tags (name, pageIdDict) VALUES (?, ?)
+        ON CONFLICT(name) DO UPDATE SET pageIdDict = json_patch(pageIdDict, ?) WHERE name = ?
+      `)
     const mergePageJson = pageIdsToBindDictString(pageIds)
     return updateStmt.bind(tagName, mergePageJson, mergePageJson, tagName)
   })
 
   const unbindCommands = unbindList.map(({ tagName, pageIds }) => {
+    const updateStmt = DB.prepare(`
+      INSERT INTO tags (name, pageIdDict) VALUES (?, ?)
+        ON CONFLICT(name) DO UPDATE SET pageIdDict = json_patch(pageIdDict, ?) WHERE name = ?
+      `)
     const mergePageJson = pageIdsToUnbindDictString(pageIds)
     return updateStmt.bind(tagName, mergePageJson, mergePageJson, tagName)
   })
@@ -110,7 +115,7 @@ function generateUpdateTagSql(
 }
 
 async function updateBindPageByTagName(
-  DB: D1Database,
+  DB: Database,
   bindList: Array<TagBindRecord>,
   unbindList: Array<TagBindRecord>,
 ) {
@@ -119,23 +124,23 @@ async function updateBindPageByTagName(
     return true
   }
 
-  const updateResult = await DB.batch(commands)
-  return updateResult.every(result => result.success)
+  const results = commands.map(stmt => stmt.run())
+  return results.every(result => result.changes > 0)
 }
 
 function pageIdsToBindDictString(pageIds: Array<number>) {
-  const dict = pageIds.reduce((acc, cur) => {
-    acc[cur.toString()] = cur
-    return acc
-  }, {})
+  const dict: Record<string, number> = {}
+  pageIds.forEach((id) => {
+    dict[id.toString()] = id
+  })
   return JSON.stringify(dict)
 }
 
 function pageIdsToUnbindDictString(pageIds: Array<number>) {
-  const dict = pageIds.reduce((acc, cur) => {
-    acc[cur.toString()] = null
-    return acc
-  }, {})
+  const dict: Record<string, null> = {}
+  pageIds.forEach((id) => {
+    dict[id.toString()] = null
+  })
   return JSON.stringify(dict)
 }
 
