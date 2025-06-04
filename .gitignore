@@ -42,5 +42,3 @@ note_zh.md
 
 docs/.vitepress/dist
 docs/.vitepress/cache
-
-.env

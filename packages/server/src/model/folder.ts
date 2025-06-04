@@ -1,64 +1,71 @@
-import type { Database } from 'better-sqlite3'
+import type { D1Database } from '@cloudflare/workers-types/experimental'
 import { isNotNil } from '@web-archive/shared/utils'
 import type { Folder } from '~/sql/types'
 
-async function checkFolderExists(DB: Database, name: string) {
+async function checkFolderExists(DB: D1Database, name: string) {
   const sql = `
     SELECT 
       id
     FROM folders
     WHERE name = ? AND isDeleted == 0
   `
-  const result = DB.prepare<unknown[], { id: number }>(sql).get(name)
-  return isNotNil(result)
+  const sqlResult = await DB.prepare(sql).bind(name).first<string>()
+  return isNotNil(sqlResult)
 }
 
-async function insertFolder(DB: Database, name: string) {
+async function insertFolder(DB: D1Database, name: string) {
   const sql = `
     INSERT INTO folders (name)
     VALUES (?)
   `
-  const result = DB.prepare(sql).run(name)
-  return result.lastInsertRowid
+  const sqlResult = await DB.prepare(sql).bind(name).run()
+  if (!sqlResult.success) {
+    throw sqlResult.error
+  }
+  return sqlResult.meta.last_row_id
 }
 
-async function updateFolder(DB: Database, options: { id: number, name: string }) {
+async function updateFolder(DB: D1Database, options: { id: number, name: string }) {
   const sql = `
     UPDATE folders
     SET name = ?
     WHERE id = ?
   `
-  const result = DB.prepare(sql).run(options.name, options.id)
-  return result.changes > 0
+  const sqlResult = await DB.prepare(sql).bind(options.name, options.id).run()
+  return sqlResult
 }
 
-async function selectAllFolders(DB: Database) {
+async function selectAllFolders(DB: D1Database) {
   const sql = `
     SELECT 
       *
     FROM folders
     WHERE isDeleted == 0
   `
-  const results = DB.prepare<unknown[], Folder>(sql).all()
-  return results
+  const sqlResult = await DB.prepare(sql).all<Folder>()
+  if (sqlResult.error) {
+    throw sqlResult.error
+  }
+  return sqlResult.results
 }
 
-async function deleteFolderById(DB: Database, id: number) {
-  const folderResult = DB.prepare(`
-    UPDATE folders
-    SET 
-      isDeleted = 1,
-      deletedAt = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(id)
-
-  const pageResult = DB.prepare(`
-    UPDATE pages
-    SET 
-      isDeleted = 1,
-      deletedAt = CURRENT_TIMESTAMP
-    WHERE folderId = ?
-  `).run(id)
+async function deleteFolderById(DB: D1Database, id: number) {
+  const [folderResult, pageResult] = await DB.batch([
+    DB.prepare(`
+      UPDATE folders
+      SET 
+        isDeleted = 1,
+        deletedAt = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(id),
+    DB.prepare(`
+      UPDATE pages
+      SET 
+        isDeleted = 1,
+        deletedAt = CURRENT_TIMESTAMP
+      WHERE folderId = ?
+    `).bind(id),
+  ])
 
   return {
     folderResult,
@@ -66,7 +73,7 @@ async function deleteFolderById(DB: Database, id: number) {
   }
 }
 
-async function getFolderById(DB: Database, options: { id: number, isDeleted?: boolean }) {
+async function getFolderById(DB: D1Database, options: { id: number, isDeleted?: boolean }) {
   const { id, isDeleted } = options
   const sql = `
     SELECT 
@@ -74,14 +81,14 @@ async function getFolderById(DB: Database, options: { id: number, isDeleted?: bo
     FROM folders
     WHERE id = ?
   `
-  const folder = DB.prepare<unknown[], Folder>(sql).get(id)
+  const folder = await DB.prepare(sql).bind(id).first<Folder>()
   if (isNotNil(isDeleted) && folder?.isDeleted !== Number(isDeleted)) {
     return null
   }
   return folder
 }
 
-async function queryDeletedFolders(DB: Database) {
+async function queryDeletedFolders(DB: D1Database) {
   const sql = `
     SELECT 
       *
@@ -89,22 +96,22 @@ async function queryDeletedFolders(DB: Database) {
     WHERE isDeleted == 1
     ORDER BY deletedAt DESC
   `
-  const results = DB.prepare<unknown[], Folder>(sql).all()
-  return results
+  const sqlResult = await DB.prepare(sql).all<Folder>()
+  return sqlResult.results
 }
 
-async function selectDeletedFolderTotalCount(DB: Database) {
+async function selectDeletedFolderTotalCount(DB: D1Database) {
   const sql = `
     SELECT 
       COUNT(id) as count
     FROM folders
     WHERE isDeleted == 1
   `
-  const result = DB.prepare(sql).get() as { count: number }
-  return result.count
+  const sqlResult = await DB.prepare(sql).first<{ count: number }>()
+  return sqlResult?.count ?? 0
 }
 
-async function restoreFolder(DB: Database, id: number) {
+async function restoreFolder(DB: D1Database, id: number) {
   const sql = `
     UPDATE folders
     SET 
@@ -112,8 +119,8 @@ async function restoreFolder(DB: Database, id: number) {
       deletedAt = NULL
     WHERE id = ?
   `
-  const result = DB.prepare(sql).run(id)
-  return result.changes > 0
+  const sqlResult = await DB.prepare(sql).bind(id).run()
+  return sqlResult.success
 }
 
 export {

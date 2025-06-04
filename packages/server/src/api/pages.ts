@@ -2,7 +2,6 @@ import { Hono } from 'hono'
 import { validator } from 'hono/validator'
 import { isNil, isNotNil, isNumberString } from '@web-archive/shared/utils'
 import { z } from 'zod'
-import { GetObjectCommand } from '@aws-sdk/client-s3'
 import type { HonoTypeUserInformation } from '~/constants/binding'
 import result from '~/utils/result'
 import { clearDeletedPage, deletePageById, getPageById, insertPage, queryAllPageIds, queryDeletedPage, queryPage, queryPageByUrl, queryRecentSavePage, restorePage, selectPageTotalCount, updatePage } from '~/model/page'
@@ -10,8 +9,6 @@ import { getFolderById, restoreFolder } from '~/model/folder'
 import { getFileFromBucket, saveFileToBucket } from '~/utils/file'
 import { updateShowcase } from '~/model/showcase'
 import { updateBindPageByTagName } from '~/model/tag'
-import type { TagBindRecord } from '~/model/tag'
-import { S3_BUCKET_NAME } from '~/constants/config'
 
 const app = new Hono<HonoTypeUserInformation>()
 
@@ -85,11 +82,7 @@ app.post(
       isShowcased,
     })
     if (isNotNil(insertId)) {
-      const updateTagResult = await updateBindPageByTagName(
-        c.env.DB,
-        bindTags.map(tagName => ({ tagName, pageIds: [Number(insertId)] })),
-        [],
-      )
+      const updateTagResult = await updateBindPageByTagName(c.env.DB, bindTags.map(tagName => ({ tagName, pageIds: [insertId] })), [])
       if (updateTagResult)
         return c.json(result.success(null))
     }
@@ -375,18 +368,14 @@ app.get(
       return c.json(result.error(500, 'Page not found'))
     }
 
-    const command = new GetObjectCommand({
-      Bucket: S3_BUCKET_NAME,
-      Key: page.contentUrl,
-    })
-    const content = await c.env.BUCKET.send(command)
-    if (!content.Body) {
+    const content = await c.env.BUCKET.get(page.contentUrl)
+    if (!content) {
       return c.json(result.error(500, 'Page data not found'))
     }
 
     c.res.headers.set('cache-control', 'private, max-age=604800')
     return c.html(
-      await content.Body.transformToString(),
+      await content.text(),
     )
   },
 )

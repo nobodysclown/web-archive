@@ -1,8 +1,8 @@
-import type { Database } from 'better-sqlite3'
+import type { D1Database } from '@cloudflare/workers-types/experimental'
 import { selectAllPageCount, selectPageTotalCount } from './page'
 import { selectAllFolders } from './folder'
 
-async function getHomeChartData(DB: Database) {
+async function getHomeChartData(DB: D1Database) {
   const folderList = await selectAllFolders(DB)
   const folderPageCountList = await Promise.all(folderList.map(async (folder) => {
     const pageCount = await selectPageTotalCount(DB, { folderId: folder.id })

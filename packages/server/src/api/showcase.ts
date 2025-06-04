@@ -1,14 +1,11 @@
 import { isNotNil } from '@web-archive/shared/utils'
 import { Hono } from 'hono'
 import { validator } from 'hono/validator'
-import { GetObjectCommand } from '@aws-sdk/client-s3'
 import type { HonoTypeUserInformation } from '~/constants/binding'
 import { getNextShowcasePageId, getShowcaseDetailById, queryShowcase } from '~/model/showcase'
 import type { Page } from '~/sql/types'
 import { getBase64FileFromBucket } from '~/utils/file'
 import result from '~/utils/result'
-import { S3_BUCKET_NAME } from '~/constants/config'
-import { getPageById } from '~/model/page'
 
 const app = new Hono<HonoTypeUserInformation>()
 
@@ -50,22 +47,25 @@ app.get('/content', async (c) => {
   }
 
   // todo refactor
-  const page = await getPageById(c.env.DB, { id: Number(pageId), isDeleted: false })
-  if (!page || !page.isShowcased) {
-    return c.json(result.error(500, 'Page not found'))
+  const pageListResult = await c.env.DB.prepare('SELECT * FROM pages WHERE isShowcased = 1 AND isDeleted = 0 AND id = ?')
+    .bind(pageId)
+    .all()
+  if (!pageListResult.success) {
+    return c.redirect('/error')
   }
 
-  const command = new GetObjectCommand({
-    Bucket: S3_BUCKET_NAME,
-    Key: page.contentUrl,
-  })
-  const content = await c.env.BUCKET.send(command)
-  if (!content.Body) {
+  const page = pageListResult.results?.[0] as Page
+  if (!page) {
+    return c.redirect('/error')
+  }
+
+  const content = await c.env.BUCKET.get(page.contentUrl)
+  if (!content) {
     return c.redirect('/error')
   }
 
   return c.html(
-    await content.Body.transformToString(),
+    await content?.text(),
   )
 })
 

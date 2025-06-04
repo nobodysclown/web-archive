@@ -1,22 +1,21 @@
 import { createHash } from 'node:crypto'
-import type { Database } from 'better-sqlite3'
 import { type AITagConfig, ConfigKey } from '@web-archive/shared/types'
 
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex')
 }
 
-async function checkAdminExist(DB: Database): Promise<boolean> {
-  const result = DB.prepare<unknown[], { count: number }>(`SELECT COUNT(*) as count FROM stores WHERE key = 'ADMIN_TOKEN'`).get() ?? { count: -1 }
-  return result?.count > 0
+async function checkAdminExist(DB: D1Database): Promise<boolean> {
+  const result: { count: number } = await DB.prepare(`SELECT COUNT(*) as count FROM stores WHERE key = 'ADMIN_TOKEN'`).first()
+  return result.count > 0
 }
 
-async function verifyAdminToken(DB: Database, token: string): Promise<'new' | 'fail' | 'reject' | 'accept'> {
+async function verifyAdminToken(DB: D1Database, token: string): Promise<'new' | 'fail' | 'reject' | 'accept'> {
   if (typeof token !== 'string' || token.length < 8)
     return 'reject'
   token = hashToken(token)
-  const result = DB.prepare<unknown[], { count: number }>(`SELECT COUNT(*) as count FROM stores WHERE key = 'ADMIN_TOKEN' AND value = ?`).get(token) ?? { count: -1 }
-  if (result?.count > 0) {
+  const result: { count: number } = await DB.prepare(`SELECT COUNT(*) as count FROM stores WHERE key = 'ADMIN_TOKEN' AND value = ?`).bind(token).first()
+  if (result.count > 0) {
     return 'accept'
   }
   const exist = await checkAdminExist(DB)
@@ -27,33 +26,42 @@ async function verifyAdminToken(DB: Database, token: string): Promise<'new' | 'f
   return 'reject'
 }
 
-async function setAdminToken(DB: Database, token: string): Promise<boolean> {
+async function setAdminToken(DB: D1Database, token: string): Promise<boolean> {
   const exist = await checkAdminExist(DB)
   if (exist) {
     throw new Error('Admin token already exists')
   }
-  const result = DB.prepare(`INSERT INTO stores (key, value) VALUES ('ADMIN_TOKEN', ?)`).run(token)
-  return result.changes > 0
+  const result = await DB.prepare(`INSERT INTO stores (key, value) VALUES ('ADMIN_TOKEN', ?)`).bind(token).run()
+  return result.success
 }
 
-async function getShouldShowRecent(DB: Database): Promise<boolean> {
-  const results = DB.prepare<unknown[], { value: string }>(`SELECT value FROM stores WHERE key = '${ConfigKey.shouldShowRecent}'`).all()
-  if (results.length === 0) {
+async function getShouldShowRecent(DB: D1Database): Promise<boolean> {
+  const result = await DB.prepare(`SELECT value FROM stores WHERE key = '${ConfigKey.shouldShowRecent}'`).all<{ value: string }>()
+  if (!result.success) {
+    throw result.error
+  }
+  if (result.results.length === 0) {
     return true
   }
-  return results[0].value === 'true'
+  return result.results[0].value === 'true'
 }
 
-async function setShouldShowRecent(DB: Database, value: boolean): Promise<boolean> {
+async function setShouldShowRecent(DB: D1Database, value: boolean): Promise<boolean> {
   const bindValue = value ? 'true' : 'false'
   const insertSql = `INSERT INTO stores (key, value) VALUES ('${ConfigKey.shouldShowRecent}', ?) ON CONFLICT(key) DO UPDATE SET value = ?`
-  const result = DB.prepare(insertSql).run(bindValue, bindValue)
-  return result.changes > 0
+  const result = await DB.prepare(insertSql).bind(bindValue, bindValue).run()
+  if (!result.success) {
+    throw result.error
+  }
+  return result.success
 }
 
-async function getAITagConfig(DB: Database): Promise<AITagConfig> {
-  const results = DB.prepare<unknown[], { value: string }>(`SELECT value FROM stores WHERE key = '${ConfigKey.aiTag}'`).all()
-  if (results.length === 0) {
+async function getAITagConfig(DB: D1Database): Promise<AITagConfig> {
+  const result = await DB.prepare(`SELECT value FROM stores WHERE key = '${ConfigKey.aiTag}'`).all<{ value: string }>()
+  if (!result.success) {
+    throw result.error
+  }
+  if (result.results.length === 0) {
     return {
       tagLanguage: 'en',
       type: 'cloudflare',
@@ -61,14 +69,17 @@ async function getAITagConfig(DB: Database): Promise<AITagConfig> {
       preferredTags: [],
     }
   }
-  return JSON.parse(results[0].value) as AITagConfig
+  return JSON.parse(result.results[0].value) as AITagConfig
 }
 
-async function setAITagConfig(DB: Database, config: AITagConfig): Promise<boolean> {
+async function setAITagConfig(DB: D1Database, config: AITagConfig): Promise<boolean> {
   const insertSql = `INSERT INTO stores (key, value) VALUES ('${ConfigKey.aiTag}', ?) ON CONFLICT(key) DO UPDATE SET value = ?`
   const bindValue = JSON.stringify(config)
-  const result = DB.prepare(insertSql).run(bindValue, bindValue)
-  return result.changes > 0
+  const result = await DB.prepare(insertSql).bind(bindValue, bindValue).run()
+  if (!result.success) {
+    throw result.error
+  }
+  return result.success
 }
 
 export {

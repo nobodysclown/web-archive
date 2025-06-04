@@ -9,8 +9,7 @@
       "vite/client"
     ],
     "strict": true,
-    "outDir": "./dist/server",
-    "esModuleInterop": true
+    "outDir": "./dist/server"
   },
   "include": ["*.ts", "./src/**/*.ts"]
 }
