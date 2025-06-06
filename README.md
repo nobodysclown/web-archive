@@ -31,3 +31,5 @@ After deployment, in the browser plugin, enter the service address and key to us
 Plugin download:
 - [Chrome](https://chromewebstore.google.com/detail/web-archive/dfigobdhnhkkdniegjdagofhhhopjajb?hl=zh-CN&utm_source=ext_sidebar)
 - [Firefox](https://addons.mozilla.org/zh-CN/firefox/addon/web-archive-ray-banzhe/)
+
+[![Powered by DartNode](https://dartnode.com/branding/DN-Open-Source-sm.png)](https://dartnode.com "Powered by DartNode - Free VPS for Open Source")
